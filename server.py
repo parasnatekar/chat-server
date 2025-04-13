@@ -9,7 +9,6 @@ port = int(os.environ.get("PORT", 12345))
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind(("0.0.0.0", port))  # Bind to the dynamic port
-
 server.listen()
 
 clients = []
@@ -18,7 +17,12 @@ nicknames = []
 # Broadcast message to all clients
 def broadcast(message):
     for client in clients:
-        client.send(message)
+        try:
+            client.send(message)
+        except (BrokenPipeError, ConnectionResetError):
+            # Remove the client if an error occurs
+            clients.remove(client)
+
 
 # Handle individual client messages
 def handle(client):
@@ -37,21 +41,29 @@ def handle(client):
 
 # Accept new connections
 def receive():
-    print("Server started and waiting for connections...")
     while True:
         client, address = server.accept()
         print(f"Connected with {str(address)}")
 
-        client.send('NICK'.encode('utf-8'))
-        nickname = client.recv(1024).decode('utf-8')
-        nicknames.append(nickname)
-        clients.append(client)
+        try:
+            # Prompt client for nickname
+            client.send('NICK'.encode('utf-8'))
+            nickname = client.recv(1024).decode('utf-8')
 
-        print(f'Nickname is {nickname}')
-        broadcast(f'{nickname} joined!'.encode('utf-8'))
-        client.send('Connected to the server!'.encode('utf-8'))
+            # Ignore HTTP requests (they often start with 'GET' or 'HEAD')
+            if nickname.startswith('GET') or nickname.startswith('HEAD') or nickname.startswith('POST'):
+                print("Ignored an HTTP request.")
+                client.close()
+                continue
 
-        thread = threading.Thread(target=handle, args=(client,))
-        thread.start()
+            clients.append(client)
+            print(f"Nickname is {nickname}")
+            broadcast(f'{nickname} joined!'.encode('utf-8'))
 
-receive()
+            thread = threading.Thread(target=handle, args=(client,))
+            thread.start()
+
+        except Exception as e:
+            print(f"Error during receiving client: {e}")
+            client.close()
+
